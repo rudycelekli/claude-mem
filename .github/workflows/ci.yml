@@ -1,4 +1,4 @@
-name: Native Windows cost report validation
+name: Native Windows report ingestion validation
 on:
   workflow_dispatch:
 permissions:
@@ -12,7 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Native report formatter and file tests
+      - run: python -m pip install tzdata==2026.2
+      - name: Native report ingestion tests
         env:
           PYTHONUTF8: '0'
-        run: python -m unittest discover -s plugin/skills/agent-cost-report/scripts/tests -p 'test_render*.py'
+        run: python -m unittest discover -s plugin/skills/agent-cost-report/scripts/tests -p 'test_transcript_encoding.py'
