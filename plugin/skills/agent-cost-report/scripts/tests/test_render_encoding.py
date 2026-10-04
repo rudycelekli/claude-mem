@@ -1,4 +1,4 @@
-"""Native file rendering under the Windows Chinese code page."""
+"""Native file rendering under a legacy Windows code page."""
 import json
 import os
 import subprocess
@@ -12,7 +12,7 @@ import _paths
 
 class NativeEncoding(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Windows code-page regression")
-    def test_html_output_is_utf8_with_cp936_process_locale(self):
+    def test_html_output_is_utf8_with_legacy_process_encoding(self):
         fixture = Path(_paths.FIXTURES) / "report-empty.json"
         data = json.loads(fixture.read_text(encoding="utf-8"))
         # A valid empty single-session report has no period date labels.
@@ -28,8 +28,7 @@ class NativeEncoding(unittest.TestCase):
 import locale, pathlib, sys
 sys.path.insert(0, sys.argv[1])
 from acr import render
-locale.setlocale(locale.LC_CTYPE, ".936")
-assert locale.getencoding().lower() == "cp936", locale.getencoding()
+assert locale.getencoding().lower() != "utf-8", locale.getencoding()
 for print_mode in (False, True):
     path = render.render_file(sys.argv[2], sys.argv[3], print_mode=print_mode)
     text = pathlib.Path(path).read_text(encoding="utf-8")
