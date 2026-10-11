@@ -1,0 +1,89 @@
+name: Validate reviewed Claude-Mem Windows npm timeout
+on:
+  push:
+    branches: ['validation/claude-windows-comments-20261011']
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Exact reviewed candidate SHA
+        required: true
+        type: string
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  native-boundary:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      EXPECTED_HEAD: ${{ inputs.candidate || 'a330f6e3b77b14137b47f5344525f05a14b8c01e' }}
+    steps:
+      - name: Check exact SHA input
+        run: '[[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: validation/claude4670-windows-20261011
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Guard candidate before creating proof
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain)"
+          mkdir proof
+          git rev-parse HEAD > proof/head.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - name: Record actual platform and runtimes
+        run: |
+          node -p 'JSON.stringify({platform:process.platform,node:process.version,comspec:process.env.ComSpec})' | tee proof/platform.json
+          bun --version | tee proof/bun.txt
+      - name: Build original source and prove native Windows retained-pipe failure
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          original=90f710d0f1ab8814a296821c3e91a3ebea38aadf
+          restore() { git restore --source="$EXPECTED_HEAD" -- src/npx-cli/install/npm-install-helper.ts; }
+          trap restore EXIT
+          git show "$original:src/npx-cli/install/npm-install-helper.ts" > src/npx-cli/install/npm-install-helper.ts
+          bun build src/npx-cli/install/npm-install-helper.ts --target=node --format=esm --outfile=proof/before.mjs 2>&1 | tee proof/before-build.log
+          set +e
+          node tests/fixtures/npm-timeout-windows-native.mjs proof/before.mjs hang > proof/before.log 2>&1
+          result=$?
+          set -e
+          cat proof/before.log
+          test "$result" -eq 1
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import assert from "node:assert/strict"; const row=readFileSync("proof/before.log","utf8").split(/\r?\n/).find(s=>s.startsWith("{")); const x=JSON.parse(row); assert.equal(x.platform,"win32"); assert.equal(x.mode,"hang"); assert.equal(x.settled,false); assert.equal(x.descendantAlive,true); assert.equal(x.result,null);'
+          restore
+          trap - EXIT
+          test -z "$(git status --porcelain -- src/npx-cli/install/npm-install-helper.ts)"
+      - name: Build actual candidate helper
+        run: bun build src/npx-cli/install/npm-install-helper.ts --target=node --format=esm --outfile=proof/after.mjs 2>&1 | tee proof/after-build.log
+      - name: Prove Windows native timeout and exit controls
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          for mode in hang success error kill-failure; do
+            node tests/fixtures/npm-timeout-windows-native.mjs proof/after.mjs "$mode" 2>&1 | tee "proof/after-$mode.log"
+          done
+      - name: Run focused tests with explicit platform skips
+        run: bun test tests/npm-install-timeout.test.ts tests/npm-install-windows-hide.test.ts tests/npm-install-windows-timeout.test.ts 2>&1 | tee proof/focused.log
+      - name: Guard unchanged tracked candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: npm-timeout-${{ matrix.os }}-proof
+          path: proof/
+          retention-days: 7
