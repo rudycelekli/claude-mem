@@ -22,7 +22,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
-      EXPECTED_HEAD: ${{ inputs.candidate || 'a330f6e3b77b14137b47f5344525f05a14b8c01e' }}
+      EXPECTED_HEAD: ${{ inputs.candidate || '69708db090537c98a49589f27629b07bc659c87a' }}
     steps:
       - name: Check exact SHA input
         run: '[[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]'
