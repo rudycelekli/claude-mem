@@ -1,0 +1,132 @@
+name: Claude context correctness candidate proof
+on:
+  workflow_dispatch:
+  push:
+    branches: [validation/claude-context-candidates-20261012]
+permissions:
+  contents: read
+concurrency:
+  group: claude-context-candidates-20261012
+  cancel-in-progress: true
+jobs:
+  native:
+    if: github.repository == 'rudycelekli/claude-mem' && github.ref == 'refs/heads/validation/claude-context-candidates-20261012'
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: '20'
+            case: live-refresh
+            head: adb2f6c5466632b4d297b2cd1ca8539bd4156e42
+          - os: windows-2022
+            node: '22'
+            case: live-refresh
+            head: adb2f6c5466632b4d297b2cd1ca8539bd4156e42
+          - os: ubuntu-latest
+            node: '20'
+            case: welcome-delete
+            head: 8780f884bc9c30bd8be898f4bb075e29c515be49
+          - os: windows-2022
+            node: '22'
+            case: welcome-delete
+            head: 8780f884bc9c30bd8be898f4bb075e29c515be49
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: rudycelekli/claude-mem
+          ref: ${{ matrix.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - name: Guard exact source and isolate runtime
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ matrix.head }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          node --version
+          bun --version
+          echo "CLAUDE_MEM_DATA_DIR=${RUNNER_TEMP}/claude-context-data" >> "$GITHUB_ENV"
+          echo "CLAUDE_CONFIG_DIR=${RUNNER_TEMP}/claude-context-config" >> "$GITHUB_ENV"
+          mkdir -p proof
+          git rev-parse HEAD HEAD^{tree} > proof/source-head-tree.txt
+      - name: Install ordinary dependencies (canonical CI command)
+        run: npm install --no-audit --no-fund
+      - name: Verify committed plugin versions before build
+        run: bun test tests/infrastructure/version-consistency.test.ts
+      - name: Typecheck (canonical CI command)
+        run: npm run typecheck
+      - name: Build including bundle budgets (canonical CI command)
+        run: npm run build
+      - name: Causal original-versus-candidate proof
+        shell: bash
+        env:
+          PROOF_CASE: ${{ matrix.case }}
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+          const base = '356b7c08f64c29f931171e264e848772a039da62';
+          const live = process.env.PROOF_CASE === 'live-refresh';
+          const source = live ? 'src/services/worker/ContextCacheService.ts' : 'src/services/worker/http/routes/SearchRoutes.ts';
+          const test = live ? 'tests/context/context-cache-live-refresh.test.ts' : 'tests/worker/http/routes/search-routes-welcome-hint.test.ts';
+          const run = () => spawnSync('bun', ['test', test], { shell: false, encoding: 'utf8', timeout: 120000, env: process.env });
+          const candidate = readFileSync(source);
+          const original = spawnSync('git', ['show', `${base}:${source}`], { shell: false, encoding: 'utf8' });
+          if (original.status !== 0) throw new Error(original.stderr);
+          let before;
+          try { writeFileSync(source, original.stdout); before = run(); }
+          finally { writeFileSync(source, candidate); }
+          const beforeLog = (before.stdout ?? '') + (before.stderr ?? '');
+          writeFileSync('proof/before.log', beforeLog);
+          const plainBeforeLog = beforeLog.replace(/\u001b\[[0-9;]*m/g, '');
+          const count = value => plainBeforeLog.split(value).length - 1;
+          const causalAssertions = live
+            ? count('Expected: "NEWER LIVE BODY"') === 2
+              && count('Received: "QUEUED BODY"') === 2
+              && count('error: expect(received).toBeNull()') === 1 && count('Received: null') === 1
+              && ['older render resolves', 'older render rejects', 'uncacheable by its newer live render'].every(name => plainBeforeLog.includes('(fail) context cache queued render versus newer live render > ' + (name.startsWith('older') ? 'keeps a newer live render of the existing variant when the ' + name : 'does not resurrect a variant made ' + name)))
+            : plainBeforeLog.includes('Expected to contain: "This project has no memory yet."')
+              && plainBeforeLog.includes('CONTEXT_FROM_GENERATOR')
+              && plainBeforeLog.includes('(fail) SearchRoutes Welcome Hint > rechecks whether memory remains after deleting one of 1 observations in the same worker');
+          if (before.error || before.status !== 1 || !plainBeforeLog.includes(live ? '3 fail' : '1 fail') || !plainBeforeLog.includes(live ? '1 pass' : '18 pass') || !causalAssertions) {
+            throw new Error('Original source did not fail the exact output-body regression assertions');
+          }
+          const after = run();
+          const afterLog = (after.stdout ?? '') + (after.stderr ?? '');
+          writeFileSync('proof/after.log', afterLog);
+          if (after.error || after.status !== 0 || !afterLog.includes('0 fail') || !afterLog.includes(live ? '4 pass' : '19 pass')) throw new Error('Candidate regression controls did not pass');
+          writeFileSync('proof/causal.json', JSON.stringify({ base, source, test, originalExit: before.status, candidateExit: after.status, runtime: { os: process.platform, node: process.version } }, null, 2));
+          JS
+      - name: Full native tests (canonical Linux CI scope)
+        if: runner.os == 'Linux'
+        run: bun test tests
+      - name: OpenClaw integration tests (canonical Linux CI scope)
+        if: runner.os == 'Linux'
+        run: bun test openclaw
+      - name: Windows native regression scope (canonical Windows CI command)
+        if: runner.os == 'Windows'
+        run: bun test tests/bun-runner.test.ts tests/scripts/mirror-dir.test.ts tests/scripts/worker-logs.test.ts
+      - name: Exact candidate source remains unchanged
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ matrix.head }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git diff --exit-code -- src tests package.json tsconfig.json bunfig.toml scripts
+          git status --porcelain --untracked-files=all > proof/after-build-status.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: claude-context-${{ matrix.case }}-${{ matrix.os }}
+          path: proof/
+          retention-days: 7
