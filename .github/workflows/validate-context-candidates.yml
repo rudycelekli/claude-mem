@@ -27,11 +27,11 @@ jobs:
           - os: ubuntu-latest
             node: '20'
             case: welcome-delete
-            head: 8780f884bc9c30bd8be898f4bb075e29c515be49
+            head: f564cce1bc53af2b2a1324474ab2b8bdc87d5131
           - os: windows-2022
             node: '22'
             case: welcome-delete
-            head: 8780f884bc9c30bd8be898f4bb075e29c515be49
+            head: f564cce1bc53af2b2a1324474ab2b8bdc87d5131
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -55,8 +55,12 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=all)"
           node --version
           bun --version
-          echo "CLAUDE_MEM_DATA_DIR=${RUNNER_TEMP}/claude-context-data" >> "$GITHUB_ENV"
-          echo "CLAUDE_CONFIG_DIR=${RUNNER_TEMP}/claude-context-config" >> "$GITHUB_ENV"
+          node --input-type=module <<'JS'
+          import { appendFileSync, mkdtempSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import { join } from 'node:path';
+          appendFileSync(process.env.GITHUB_ENV, `CLAUDE_MEM_DATA_DIR=${mkdtempSync(join(tmpdir(), 'claude-context-native-'))}\n`);
+          JS
           mkdir -p proof
           git rev-parse HEAD HEAD^{tree} > proof/source-head-tree.txt
       - name: Install ordinary dependencies (canonical CI command)
@@ -88,10 +92,10 @@ jobs:
           finally { writeFileSync(source, candidate); }
           const beforeLog = (before.stdout ?? '') + (before.stderr ?? '');
           writeFileSync('proof/before.log', beforeLog);
-          const plainBeforeLog = beforeLog.replace(/\u001b\[[0-9;]*m/g, '');
+          const plainBeforeLog = beforeLog.replace(/\u001b\[[0-9;]*m/g, '').split('\n').filter(line => !/^::(?:error|warning|notice|group|endgroup)(?:[ :])/.test(line)).join('\n');
           const count = value => plainBeforeLog.split(value).length - 1;
           const causalAssertions = live
-            ? count('Expected: "NEWER LIVE BODY"') === 2
+            ? count('error:') === 3 && count('Expected: "NEWER LIVE BODY"') === 2
               && count('Received: "QUEUED BODY"') === 2
               && count('error: expect(received).toBeNull()') === 1 && count('Received: null') === 1
               && ['older render resolves', 'older render rejects', 'uncacheable by its newer live render'].every(name => plainBeforeLog.includes('(fail) context cache queued render versus newer live render > ' + (name.startsWith('older') ? 'keeps a newer live render of the existing variant when the ' + name : 'does not resurrect a variant made ' + name)))
