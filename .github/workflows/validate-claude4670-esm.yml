@@ -1,0 +1,67 @@
+name: Validate Claude4670 explicit ESM extension
+on:
+  push:
+    branches: ['validation/claude4670-esm-proof-20261011']
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  native-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        node: ['20.12.0', '22.23.2']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: validation/claude4670-esm-source-20261011
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Assert exact reviewed source
+        run: |
+          test "$(git rev-parse HEAD)" = 'eb2d55a194449296ac43bb428d469286ef524d11'
+          test -z "$(git status --porcelain)"
+          mkdir proof
+          git rev-parse HEAD > proof/head.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - name: Record real platform and Node
+        run: node -p 'JSON.stringify({platform:process.platform,node:process.version})' > proof/platform.json
+      - name: Reproduce original Node20 Windows loader failure
+        if: runner.os == 'Windows' && matrix.node == '20.12.0'
+        run: |
+          set -euo pipefail
+          original=69708db090537c98a49589f27629b07bc659c87a
+          git show "$original:tests/npm-install-windows-timeout.test.ts" > tests/npm-install-windows-timeout.test.ts
+          set +e
+          bun test tests/npm-install-windows-timeout.test.ts > proof/before.log 2>&1
+          result=$?
+          set -e
+          git restore tests/npm-install-windows-timeout.test.ts
+          cat proof/before.log
+          test "$result" -ne 0
+          grep -q '4 fail' proof/before.log
+          grep -Eq 'Cannot use import statement outside a module|Unexpected token .export' proof/before.log
+          test -z "$(git status --porcelain -- tests/npm-install-windows-timeout.test.ts)"
+      - name: Candidate real Windows or POSIX tests
+        run: |
+          set -euo pipefail
+          bun test tests/npm-install-windows-timeout.test.ts tests/npm-install-timeout.test.ts tests/npm-install-windows-hide.test.ts 2>&1 | tee proof/after.log
+          grep -q '0 fail' proof/after.log
+          test "$(git rev-parse HEAD)" = 'eb2d55a194449296ac43bb428d469286ef524d11'
+          test -z "$(git status --porcelain --untracked-files=no)"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: esm-${{ matrix.os }}-${{ matrix.node }}
+          path: proof
+          retention-days: 7
