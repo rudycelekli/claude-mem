@@ -35,7 +35,8 @@ const fixture = String.raw`
     if (tool === 'chroma_create_collection') return {};
     if (tool !== 'chroma_query_documents') throw new Error('Unexpected vector tool: ' + tool);
     calls.push(args);
-    const hits = docs.slice(0, args.n_results);
+    // A selective project must fall back after unfiltered candidates miss it.
+    const hits = args.where ? docs.slice(0, args.n_results) : [];
     return { ids: [hits.map(d => d.id)], metadatas: [hits.map(d => d.metadata)], distances: [hits.map((_, n) => n / 1000)] };
   };
   const corpusStore = new CorpusStore();
@@ -108,6 +109,8 @@ describe('corpus observation budget through registered HTTP routes', () => {
     expect(result.requests[0].narratives).toHaveLength(150);
     expect(result.requests[0].narratives.every((text: string) => text.startsWith('Recorded fact for module '))).toBe(true);
     expect(result.calls.length).toBeGreaterThan(0);
+    expect(result.calls.some((call: { where?: unknown }) => !call.where)).toBe(true);
+    expect(result.calls.some((call: { where?: unknown }) => Boolean(call.where))).toBe(true);
     for (const call of result.calls) expect(call.include).toEqual(['metadatas', 'distances']);
     expect(result.requests.map((r: { count: number }) => r.count)).toEqual([150, 500, 4]);
     expect(result.requests.map((r: { persisted: number }) => r.persisted)).toEqual([150, 500, 4]);
