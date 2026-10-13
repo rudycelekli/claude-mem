@@ -1,0 +1,307 @@
+---
+name: Claude-mem corpus query payload follow-up proof
+'on':
+  push:
+    branches:
+    - campaign/cm-corpus-wire-proof-20261013
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: claude-mem-corpus-wire-followup-proof
+  cancel-in-progress: false
+jobs:
+  linux:
+    name: Linux canonical core (${{ matrix.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+        - id: corpus-wire-followup
+          head: e79196a4809f63d4c7158cf1ef66f113fbf5f8b9
+          source: src/services/worker/knowledge/CorpusBuilder.ts
+          regression: tests/worker/knowledge/corpus-budget-http.test.ts
+          positive: 3
+          before_pass: 0
+          before_fail: 3
+          source_hash: 7e4c1792a51e67f44c92f3ca1a96d09c36fc83d5222b2f2036b7c83fdc28b608
+          test_hash: 721ff4a5c5be471b1ab6a0ca05ec071525064aa62eaa81b750641150a8323f99
+          source_extra: src/services/worker/search/strategies/ChromaSearchStrategy.ts
+          source_extra_hash: b4fc6950079d6c5533bdcb84d56a05d1db868d747d6165c818d2b988f196ce4b
+          regression_wire: tests/services/sync/chroma-query-payload.test.ts
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ matrix.head }}"
+        fetch-depth: 3
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ github.sha }}"
+        path: ".cm-candidate-proof"
+        sparse-checkout: ".github/scripts"
+        persist-credentials: false
+        fetch-depth: 1
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 20.20.2
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      with:
+        bun-version: 1.4.3
+    - name: Source identity and runtime receipt
+      env:
+        EXPECTED_HEAD: "${{ matrix.head }}"
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+        test "$(git show -s --format=%P HEAD)" = "93522e47a01b853fcbe7c556b02c915a62057427"
+        git cat-file -e a2150b2c09c6da01dfdc1296f8d2c3f3975a4418^{commit}
+        test "$(node --version)" = "v20.20.2"
+        test "$(bun --version)" = "1.4.3"
+        mkdir -p "$RUNNER_TEMP/cmem-proof"
+        python3 - <<'CHECK'
+        import hashlib,json,pathlib
+        for name,wanted in json.loads(pathlib.Path('.cm-candidate-proof/.github/scripts/cm-corpus-wire-source-hashes.json').read_text()).items():
+            assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==wanted,name
+        CHECK
+        git rev-parse HEAD > "$RUNNER_TEMP/cmem-proof/head.txt"
+        node --version > "$RUNNER_TEMP/cmem-proof/node.txt"
+        bun --version > "$RUNNER_TEMP/cmem-proof/bun.txt"
+    - name: Validate receipt evaluator rejection controls
+      run: python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --self-test
+    - name: Install dependencies (canonical CI command)
+      run: npm install --no-audit --no-fund
+    - name: Verify committed plugin bundles before rebuilding
+      run: bun test tests/infrastructure/version-consistency.test.ts tests/infrastructure/committed-plugin-bundles.test.ts
+    - name: Exact-base negative control
+      env:
+        SOURCE_FILE: "${{ matrix.source }}"
+        SOURCE_EXTRA_FILE: "${{ matrix.source_extra }}"
+        TEST_FILE: "${{ matrix.regression }}"
+        EXPECTED_HEAD: "${{ matrix.head }}"
+        BEFORE_PASS: "${{ matrix.before_pass }}"
+        BEFORE_FAIL: "${{ matrix.before_fail }}"
+        TEST_WIRE: "${{ matrix.regression_wire }}"
+      run: |
+        set -euo pipefail
+        git checkout a2150b2c09c6da01dfdc1296f8d2c3f3975a4418 -- "$SOURCE_FILE" "$SOURCE_EXTRA_FILE" src/services/sync/ChromaSync.ts
+        set +e
+        bun test "$TEST_FILE" "$TEST_WIRE" > "$RUNNER_TEMP/cmem-proof/before.log" 2>&1
+        before_status=$?
+        set -e
+        git checkout "$EXPECTED_HEAD" -- "$SOURCE_FILE" "$SOURCE_EXTRA_FILE" src/services/sync/ChromaSync.ts
+        cat "$RUNNER_TEMP/cmem-proof/before.log"
+        test "$before_status" -ne 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/before.log" "$BEFORE_PASS" "$BEFORE_FAIL" 0 "$before_status" 1
+    - name: Typecheck root and viewer (canonical CI command)
+      run: npm run typecheck
+    - name: Build with bundle-size guards (canonical CI command)
+      run: npm run build
+    - name: Preserve generated artifact diff and authored source hashes
+      env:
+        EXPECTED_HEAD: "${{ matrix.head }}"
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+        test "$(git show -s --format=%P HEAD)" = "93522e47a01b853fcbe7c556b02c915a62057427"
+        git cat-file -e a2150b2c09c6da01dfdc1296f8d2c3f3975a4418^{commit}
+        test "$(node --version)" = "v20.20.2"
+        test "$(bun --version)" = "1.4.3"
+        mkdir -p "$RUNNER_TEMP/cmem-proof"
+        python3 - <<'CHECK'
+        import hashlib,json,pathlib
+        for name,wanted in json.loads(pathlib.Path('.cm-candidate-proof/.github/scripts/cm-corpus-wire-source-hashes.json').read_text()).items():
+            assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==wanted,name
+        CHECK
+        git rev-parse HEAD > "$RUNNER_TEMP/cmem-proof/head.txt"
+        node --version > "$RUNNER_TEMP/cmem-proof/node.txt"
+        bun --version > "$RUNNER_TEMP/cmem-proof/bun.txt"
+        git diff --binary > "$RUNNER_TEMP/cmem-proof/generated-build.patch"
+    - name: Positive regression with exact executed count
+      env:
+        TEST_FILE: "${{ matrix.regression }}"
+        EXPECTED_PASS: "${{ matrix.positive }}"
+        TEST_WIRE: "${{ matrix.regression_wire }}"
+      run: |
+        set -euo pipefail
+        set +e
+        bun test "$TEST_FILE" "$TEST_WIRE" 2>&1 | tee "$RUNNER_TEMP/cmem-proof/after.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/after.log" "$EXPECTED_PASS" 0 0 "${pipeline_status[0]}" 0
+    - name: Full repository Bun suite (canonical CI command)
+      run: |
+        set -euo pipefail
+        set +e
+        bun test tests 2>&1 | tee "$RUNNER_TEMP/cmem-proof/full-suite.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/full-suite.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/full-suite-counts.json"
+    - name: Openclaw suite (canonical CI command)
+      run: |
+        set -euo pipefail
+        set +e
+        bun test openclaw 2>&1 | tee "$RUNNER_TEMP/cmem-proof/openclaw.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/openclaw.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/openclaw-counts.json"
+    - name: Semantic hydration and search contract selection
+      if: matrix.id == 'semantic-json'
+      run: |
+        set -euo pipefail
+        bun test tests/worker/search/ tests/services/sqlite/summary-file-filter-columns.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/search-selection.log"
+    - name: Import, native prompt and sync contract selection
+      if: matrix.id == 'native-import'
+      run: |
+        set -euo pipefail
+        bun test tests/sqlite/import-row-identities.test.ts tests/sqlite/native-prompt-identity.test.ts tests/worker/sync/canonical-content.test.ts tests/worker/sync/prompt-text-clamp.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/import-sync-selection.log"
+    - name: Corpus builder, ChromaSync and search contracts
+      run: |
+        set -euo pipefail
+        set +e
+        bun test tests/worker/knowledge/ tests/worker/search/ tests/services/sync/chroma-query-postfilter.test.ts tests/services/sync/chroma-query-payload.test.ts tests/worker/http/routes/corpus-routes-coercion.test.ts tests/worker/http/routes/corpus-rebuild-guard.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/corpus-selection.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/corpus-selection.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/corpus-selection-counts.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: claude-mem-${{ matrix.id }}-linux-proof
+        path: "${{ runner.temp }}/cmem-proof/"
+        retention-days: 7
+  windows:
+    name: Windows declared core (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+        - id: corpus-wire-followup
+          head: e79196a4809f63d4c7158cf1ef66f113fbf5f8b9
+          source: src/services/worker/knowledge/CorpusBuilder.ts
+          regression: tests/worker/knowledge/corpus-budget-http.test.ts
+          positive: 3
+          before_pass: 0
+          before_fail: 3
+          source_hash: 7e4c1792a51e67f44c92f3ca1a96d09c36fc83d5222b2f2036b7c83fdc28b608
+          test_hash: 721ff4a5c5be471b1ab6a0ca05ec071525064aa62eaa81b750641150a8323f99
+          source_extra: src/services/worker/search/strategies/ChromaSearchStrategy.ts
+          source_extra_hash: b4fc6950079d6c5533bdcb84d56a05d1db868d747d6165c818d2b988f196ce4b
+          regression_wire: tests/services/sync/chroma-query-payload.test.ts
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ matrix.head }}"
+        fetch-depth: 3
+    - name: Verify immutable source identity
+      shell: pwsh
+      run: |
+        if ((git rev-parse HEAD).Trim() -ne '${{ matrix.head }}') { throw 'Unexpected source head' }
+        if ((git show -s --format=%P HEAD).Trim() -ne '93522e47a01b853fcbe7c556b02c915a62057427') { throw 'Unexpected source parent' }
+        if ((Get-FileHash 'src/services/sync/ChromaSync.ts' -Algorithm SHA256).Hash.ToLower() -ne 'fc096f0d12dc3422cb45ff907a37e8944179b921ddebe62febb14dc700545068') { throw 'Source digest mismatch: src/services/sync/ChromaSync.ts' }
+        if ((Get-FileHash 'src/services/worker/knowledge/CorpusBuilder.ts' -Algorithm SHA256).Hash.ToLower() -ne '7e4c1792a51e67f44c92f3ca1a96d09c36fc83d5222b2f2036b7c83fdc28b608') { throw 'Source digest mismatch: src/services/worker/knowledge/CorpusBuilder.ts' }
+        if ((Get-FileHash 'src/services/worker/search/strategies/ChromaSearchStrategy.ts' -Algorithm SHA256).Hash.ToLower() -ne 'b4fc6950079d6c5533bdcb84d56a05d1db868d747d6165c818d2b988f196ce4b') { throw 'Source digest mismatch: src/services/worker/search/strategies/ChromaSearchStrategy.ts' }
+        if ((Get-FileHash 'tests/services/sync/chroma-query-payload.test.ts' -Algorithm SHA256).Hash.ToLower() -ne '5aa38515f1d14f9750c4a98883e2eafc1321251d1841256ff8f0940851a4f113') { throw 'Source digest mismatch: tests/services/sync/chroma-query-payload.test.ts' }
+        if ((Get-FileHash 'tests/services/sync/chroma-query-postfilter.test.ts' -Algorithm SHA256).Hash.ToLower() -ne '2c556d6c0c1b9fee4e35c6da0ff6fb7f987ee1db4e91829a3560bb5ce0b57ddb') { throw 'Source digest mismatch: tests/services/sync/chroma-query-postfilter.test.ts' }
+        if ((Get-FileHash 'tests/worker/knowledge/corpus-budget-http.test.ts' -Algorithm SHA256).Hash.ToLower() -ne '721ff4a5c5be471b1ab6a0ca05ec071525064aa62eaa81b750641150a8323f99') { throw 'Source digest mismatch: tests/worker/knowledge/corpus-budget-http.test.ts' }
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ github.sha }}"
+        path: ".cm-candidate-proof"
+        sparse-checkout: ".github/scripts"
+        persist-credentials: false
+        fetch-depth: 1
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: '22'
+    - name: Install Bun (worker runtime)
+      run: 'irm bun.sh/install.ps1 | iex
+
+'
+      shell: pwsh
+    - shell: pwsh
+      run: |
+        npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+    - shell: pwsh
+      run: |
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw 'npm build failed' }
+    - shell: pwsh
+      run: |
+        $bun = Join-Path $env:USERPROFILE '.bun\\bin\\bun.exe'
+        & $bun test tests/bun-runner.test.ts tests/scripts/mirror-dir.test.ts tests/scripts/worker-logs.test.ts 2>&1 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'cmem-windows-regression.log')
+        $producerStatus = $LASTEXITCODE
+        if ($producerStatus -ne 0) { throw 'Windows Bun regression producer failed' }
+        python .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py (Join-Path $env:RUNNER_TEMP 'cmem-windows-regression.log') 51 0 2 $producerStatus 0
+        if ($LASTEXITCODE -ne 0) { throw 'Windows executed counts disagree with the declared scope' }
+    - name: Exercise marketplace sync
+      shell: pwsh
+      run: |
+        $env:PATH = "$(Join-Path $env:USERPROFILE '.bun\bin');$env:PATH"
+
+        $scratchHome = Join-Path $env:RUNNER_TEMP 'sync-home'
+        $marketplace = Join-Path $scratchHome '.claude\plugins\marketplaces\thedotmack'
+        $dep = Join-Path $marketplace 'node_modules\pre-existing-dep'
+        New-Item -ItemType Directory -Force -Path $dep | Out-Null
+        Set-Content -Path (Join-Path $marketplace 'STALE-FROM-OLD-BUILD.js') -Value 'stale'
+        Set-Content -Path (Join-Path $dep 'index.js') -Value 'installed'
+
+        $env:USERPROFILE = $scratchHome
+        node scripts/sync-marketplace.cjs
+        if ($LASTEXITCODE -ne 0) { throw 'Marketplace sync producer failed' }
+
+        if (-not (Test-Path (Join-Path $marketplace 'plugin\.claude-plugin\plugin.json'))) {
+          throw 'sync did not populate the marketplace'
+        }
+        if (Test-Path (Join-Path $marketplace 'STALE-FROM-OLD-BUILD.js')) {
+          throw 'sync left a stale file behind (--delete equivalence broken)'
+        }
+        if (-not (Test-Path (Join-Path $dep 'index.js'))) {
+          throw 'sync deleted installed deps that --delete protected'
+        }
+        if (Test-Path (Join-Path $marketplace 'workers')) {
+          throw 'sync copied the excluded workers/ tree'
+        }
+    - name: Exercise worker log tail
+      shell: pwsh
+      run: |
+        $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'log-home'
+        $logs = Join-Path $env:USERPROFILE '.claude-mem\logs'
+        New-Item -ItemType Directory -Force -Path $logs | Out-Null
+        $stamp = [DateTime]::UtcNow.ToString('yyyy-MM-dd')
+        Set-Content -Path (Join-Path $logs "claude-mem-$stamp.log") -Value (1..60 | ForEach-Object { "line $_" })
+
+        $out = node scripts/worker-logs.cjs
+        if ($LASTEXITCODE -ne 0) { throw 'Worker log producer failed' }
+        if ($out.Count -ne 50) { throw "expected 50 lines, got $($out.Count)" }
+        if ($out[0].TrimEnd() -ne 'line 11') { throw "expected first line 'line 11', got '$($out[0])'" }
+        if ($out[49].TrimEnd() -ne 'line 60') { throw "expected last line 'line 60', got '$($out[49])'" }
+    - name: Preserve generated Windows build diff
+      shell: pwsh
+      run: |
+        $diff = git diff --binary
+        if ($LASTEXITCODE -ne 0) { throw 'Generated diff capture failed' }
+        $diff | Set-Content (Join-Path $env:RUNNER_TEMP 'cmem-generated.patch')
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: claude-mem-${{ matrix.id }}-windows-generated-diff
+        path: |
+          ${{ runner.temp }}/cmem-generated.patch
+          ${{ runner.temp }}/cmem-windows-regression.log
+        retention-days: 7

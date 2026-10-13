@@ -1,0 +1,8 @@
+{
+  "src/services/sync/ChromaSync.ts": "fc096f0d12dc3422cb45ff907a37e8944179b921ddebe62febb14dc700545068",
+  "src/services/worker/knowledge/CorpusBuilder.ts": "7e4c1792a51e67f44c92f3ca1a96d09c36fc83d5222b2f2036b7c83fdc28b608",
+  "src/services/worker/search/strategies/ChromaSearchStrategy.ts": "b4fc6950079d6c5533bdcb84d56a05d1db868d747d6165c818d2b988f196ce4b",
+  "tests/services/sync/chroma-query-payload.test.ts": "5aa38515f1d14f9750c4a98883e2eafc1321251d1841256ff8f0940851a4f113",
+  "tests/services/sync/chroma-query-postfilter.test.ts": "2c556d6c0c1b9fee4e35c6da0ff6fb7f987ee1db4e91829a3560bb5ce0b57ddb",
+  "tests/worker/knowledge/corpus-budget-http.test.ts": "721ff4a5c5be471b1ab6a0ca05ec071525064aa62eaa81b750641150a8323f99"
+}
