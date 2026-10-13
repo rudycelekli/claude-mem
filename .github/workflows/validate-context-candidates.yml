@@ -19,11 +19,11 @@ jobs:
           - os: ubuntu-latest
             node: '20'
             case: fallback-hydration
-            head: 5095e58d4466ca7a9109c75e6cde8602893d1378
+            head: e271e001dbfb67e036db7f294c5b069cdd8afe10
           - os: windows-2022
             node: '22'
             case: fallback-hydration
-            head: 5095e58d4466ca7a9109c75e6cde8602893d1378
+            head: e271e001dbfb67e036db7f294c5b069cdd8afe10
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -44,7 +44,7 @@ jobs:
           EXPECTED_HEAD: ${{ matrix.head }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse HEAD^{tree})" = "fc6f08d980550d0758e85d5615088eb588255195"
+          test "$(git rev-parse HEAD^{tree})" = "f8b5a13ad3b3882c44104a82b566997eb0a09596"
           test -z "$(git status --porcelain --untracked-files=all)"
           node --version
           bun --version
@@ -103,7 +103,7 @@ jobs:
           EXPECTED_HEAD: ${{ matrix.head }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          test "$(git rev-parse HEAD^{tree})" = "fc6f08d980550d0758e85d5615088eb588255195"
+          test "$(git rev-parse HEAD^{tree})" = "f8b5a13ad3b3882c44104a82b566997eb0a09596"
           git diff --exit-code -- src tests package.json tsconfig.json bunfig.toml scripts
           sha256sum -c proof/tracked-before.sha256 > proof/tracked-after-verification.txt || true
           git diff --stat HEAD > proof/tracked-generated-diff.txt
