@@ -1,0 +1,116 @@
+name: Claude context correctness candidate proof
+on:
+  workflow_dispatch:
+  push:
+    branches: [validation/cm4746-fallback-20261013]
+permissions:
+  contents: read
+concurrency:
+  group: cm4746-fallback-20261013
+  cancel-in-progress: true
+jobs:
+  native:
+    if: github.repository == 'rudycelekli/claude-mem' && github.ref == 'refs/heads/validation/cm4746-fallback-20261013'
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: '20'
+            case: fallback-hydration
+            head: 5095e58d4466ca7a9109c75e6cde8602893d1378
+          - os: windows-2022
+            node: '22'
+            case: fallback-hydration
+            head: 5095e58d4466ca7a9109c75e6cde8602893d1378
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: rudycelekli/claude-mem
+          ref: ${{ matrix.head }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: '1.4.2'
+      - name: Guard exact source and isolate runtime
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ matrix.head }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "fc6f08d980550d0758e85d5615088eb588255195"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          node --version
+          bun --version
+          node --input-type=module <<'JS'
+          import { appendFileSync, mkdtempSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import { join } from 'node:path';
+          appendFileSync(process.env.GITHUB_ENV, `CLAUDE_MEM_DATA_DIR=${mkdtempSync(join(tmpdir(), 'claude-context-native-'))}\n`);
+          JS
+          mkdir -p proof
+          git ls-files -z | xargs -0 sha256sum > proof/tracked-before.sha256
+          git rev-parse HEAD HEAD^{tree} > proof/source-head-tree.txt
+      - name: Install ordinary dependencies (canonical CI command)
+        run: npm install --no-audit --no-fund
+      - name: Verify committed plugin versions before build
+        run: bun test tests/infrastructure/version-consistency.test.ts tests/infrastructure/committed-plugin-bundles.test.ts
+      - name: Typecheck (canonical CI command)
+        run: npm run typecheck
+      - name: Build including bundle budgets (canonical CI command)
+        run: npm run build
+      - name: Original fallback versus candidate hydration proof
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          import { spawnSync } from 'node:child_process';
+          const source = 'src/services/sync/ChromaSync.ts';
+          const candidate = readFileSync(source, 'utf8');
+          const original = spawnSync('git', ['show', '93522e47a01b853fcbe7c556b02c915a62057427:' + source], { encoding: 'utf8' });
+          if (original.status !== 0) throw new Error('Original source unavailable');
+          let before;
+          try {
+            writeFileSync(source, original.stdout);
+            before = spawnSync('bun', ['test', 'tests/worker/knowledge/corpus-budget-http.test.ts'], { encoding: 'utf8' });
+          } finally { writeFileSync(source, candidate); }
+          const log = (before.stdout ?? '') + (before.stderr ?? '');
+          writeFileSync('proof/before.log', log);
+          if (before.status !== 1 || !log.includes('1 fail') || !log.includes('1 pass') || !log.includes('documents') || !log.includes('toEqual')) throw new Error('Original unused text include assertion not proved');
+          const after = spawnSync('bun', ['test', 'tests/worker/knowledge/corpus-budget-http.test.ts'], { encoding: 'utf8' });
+          writeFileSync('proof/after.log', (after.stdout ?? '') + (after.stderr ?? ''));
+          if (after.status !== 0) throw new Error('Candidate hydration tests failed');
+          JS
+      - name: Full native tests (canonical Linux CI scope)
+        if: runner.os == 'Linux'
+        run: bun test tests
+      - name: OpenClaw integration tests (canonical Linux CI scope)
+        if: runner.os == 'Linux'
+        run: bun test openclaw
+      - name: Windows native regression scope (canonical Windows CI command)
+        if: runner.os == 'Windows'
+        run: bun test tests/bun-runner.test.ts tests/scripts/mirror-dir.test.ts tests/scripts/worker-logs.test.ts
+      - name: Exact candidate source remains unchanged
+        if: always()
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ matrix.head }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "fc6f08d980550d0758e85d5615088eb588255195"
+          git diff --exit-code -- src tests package.json tsconfig.json bunfig.toml scripts
+          sha256sum -c proof/tracked-before.sha256 > proof/tracked-after-verification.txt || true
+          git diff --stat HEAD > proof/tracked-generated-diff.txt
+          git status --porcelain --untracked-files=all > proof/after-build-status.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: claude-context-${{ matrix.case }}-${{ matrix.os }}
+          path: proof/
+          retention-days: 7
