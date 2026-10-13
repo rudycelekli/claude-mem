@@ -56,3 +56,20 @@ it('does not let a native turn erase an earlier legacy prompt with equal text', 
     });
   } finally { store.close(); }
 });
+
+it('does not let a later legacy delivery erase an earlier native turn with equal text', async () => {
+  const store = new SessionStore(':memory:', { syncOpsEnabled: false });
+  try {
+    const sid = store.createSDKSession('native-first-feed', 'project', 'again');
+    const native = store.saveNativeUserPrompt('native-first-feed', sid, 'real-turn', 'again');
+    const legacy = store.saveUserPrompt('native-first-feed', 2, 'again', sid);
+    store.db.run('UPDATE user_prompts SET created_at_epoch = ? WHERE id = ?', [1000, native.id]);
+    store.db.run('UPDATE user_prompts SET created_at_epoch = ? WHERE id = ?', [2000, legacy]);
+    await withFeed(store, async url => {
+      const response = await fetch(`${url}/api/prompts?project=project`);
+      expect(response.status).toBe(200);
+      const page = await response.json() as { items: Array<{ id: number }> };
+      expect(page.items.map(row => row.id)).toEqual([legacy, native.id]);
+    });
+  } finally { store.close(); }
+});
