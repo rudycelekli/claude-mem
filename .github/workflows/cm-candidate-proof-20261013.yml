@@ -1,0 +1,357 @@
+name: Claude-mem exact-source candidate proof
+
+on:
+  push:
+    branches: [campaign/cm-native-proof-20261013]
+permissions:
+  contents: read
+concurrency:
+  group: claude-mem-native-candidate-proof
+  cancel-in-progress: false
+jobs:
+  linux:
+    name: Linux canonical core (${{ matrix.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - id: 'notes-size'
+            head: '44b8f83d587ada98dcde5ff3d4c38cad9b8efce5'
+            source: 'src/ui/viewer-template.html'
+            regression: 'tests/ui/viewer/notes-icon-size.browser.test.ts'
+            positive: 1
+            before_pass: 0
+            before_fail: 1
+            source_hash: '8464ed30b050d50abd0dabb48df43f9fa5c315205d4b6c73425bb6d3c7fc43c9'
+            test_hash: '874cb40c7864e2c14d8972f8937dedecf0f74d499aa04139db9e7fa33504190e'
+          - id: 'native-feed'
+            head: 'ae155936e8f9400370c11d77728883bffb9a0382'
+            source: 'src/services/worker/PaginationHelper.ts'
+            regression: 'tests/worker/http/routes/data-native-prompts.test.ts'
+            positive: 2
+            before_pass: 0
+            before_fail: 2
+            source_hash: '4a1d572da36910e1de5fd81b02f56e916ec62cd6a79be9ac1ccbb9989ca150a3'
+            test_hash: 'df5c4e038fca69c55b50fac8ea074da743af9f9f33da5ce9de3455bd78aac36a'
+          - id: 'feed-order'
+            head: 'b854696c8fef1f9d4d960df4e108dcaa98a056ab'
+            source: 'src/services/worker/PaginationHelper.ts'
+            regression: 'tests/worker/http/routes/data-tied-feed-order.test.ts'
+            positive: 1
+            before_pass: 0
+            before_fail: 1
+            source_hash: '44799e68d2eeab1a967ee2db800b1ce0a863438ce11bf72f63ba653d96813621'
+            test_hash: '7ddfd6f2790bfc33e41ac298b5d2210096cd010c6a42b5dce67523ff54a90e80'
+          - id: 'semantic-json'
+            head: 'f460281c9edf336c7ead96336dda92c9c03dfd12'
+            source: 'src/services/sqlite/SessionStore.ts'
+            regression: 'tests/worker/search/semantic-persisted-json.test.ts'
+            positive: 2
+            before_pass: 0
+            before_fail: 2
+            source_hash: 'f4d3f77a814c15d35b5b5682207e0014d94595d68e03cc3f64d22f0e34a30f45'
+            test_hash: '5fd966c02fc09e45f71aea7390dfef81814b03c8fa886ed9a514f999629d8295'
+          - id: 'native-import'
+            head: '7f151207ca323477755f22f9ab7fe165ad95c9f2'
+            source: 'src/services/sqlite/SessionStore.ts'
+            regression: 'tests/worker/http/routes/data-native-prompt-import.test.ts'
+            positive: 2
+            before_pass: 1
+            before_fail: 1
+            source_hash: 'c75f472ada19f79294adbf37193f5f6efb4d65795fedc3b96cf7929c72bc6b80'
+            test_hash: '3cb22ae979e9ccde5c31f2b534d92d38a911e5ca674749e6b3b65196907ae2ae'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.head }}
+          fetch-depth: 2
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .cm-candidate-proof
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Source identity and runtime receipt
+        env:
+          EXPECTED_HEAD: ${{ matrix.head }}
+          SOURCE_FILE: ${{ matrix.source }}
+          TEST_FILE: ${{ matrix.regression }}
+          SOURCE_HASH: ${{ matrix.source_hash }}
+          TEST_HASH: ${{ matrix.test_hash }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          mkdir -p "$RUNNER_TEMP/cmem-proof"
+          printf '%s  %s\n' "$SOURCE_HASH" "$SOURCE_FILE" "$TEST_HASH" "$TEST_FILE" | sha256sum -c -
+          git rev-parse HEAD > "$RUNNER_TEMP/cmem-proof/head.txt"
+          node --version > "$RUNNER_TEMP/cmem-proof/node.txt"
+          bun --version > "$RUNNER_TEMP/cmem-proof/bun.txt"
+      - name: Validate receipt evaluator rejection controls
+        run: python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --self-test
+      - name: Install dependencies (canonical CI command)
+        run: npm install --no-audit --no-fund
+      - name: Verify committed plugin bundles before rebuilding
+        run: bun test tests/infrastructure/version-consistency.test.ts tests/infrastructure/committed-plugin-bundles.test.ts
+      - name: Exact-base negative control
+        env:
+          SOURCE_FILE: ${{ matrix.source }}
+          TEST_FILE: ${{ matrix.regression }}
+          EXPECTED_HEAD: ${{ matrix.head }}
+          BEFORE_PASS: ${{ matrix.before_pass }}
+          BEFORE_FAIL: ${{ matrix.before_fail }}
+        run: |
+          set -euo pipefail
+          git checkout a2150b2c09c6da01dfdc1296f8d2c3f3975a4418 -- "$SOURCE_FILE"
+          set +e
+          bun test "$TEST_FILE" > "$RUNNER_TEMP/cmem-proof/before.log" 2>&1
+          before_status=$?
+          set -e
+          git checkout "$EXPECTED_HEAD" -- "$SOURCE_FILE"
+          cat "$RUNNER_TEMP/cmem-proof/before.log"
+          test "$before_status" -ne 0
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/before.log" "$BEFORE_PASS" "$BEFORE_FAIL" 0 "$before_status" 1
+      - name: Typecheck root and viewer (canonical CI command)
+        run: npm run typecheck
+      - name: Build with bundle-size guards (canonical CI command)
+        run: npm run build
+      - name: Preserve generated artifact diff and authored source hashes
+        env:
+          SOURCE_FILE: ${{ matrix.source }}
+          TEST_FILE: ${{ matrix.regression }}
+          SOURCE_HASH: ${{ matrix.source_hash }}
+          TEST_HASH: ${{ matrix.test_hash }}
+        run: |
+          set -euo pipefail
+          git diff --binary > "$RUNNER_TEMP/cmem-proof/generated-build.patch"
+          printf '%s  %s\n' "$SOURCE_HASH" "$SOURCE_FILE" "$TEST_HASH" "$TEST_FILE" | sha256sum -c -
+      - name: Positive regression with exact executed count
+        env:
+          TEST_FILE: ${{ matrix.regression }}
+          EXPECTED_PASS: ${{ matrix.positive }}
+        run: |
+          set -euo pipefail
+          set +e
+          bun test "$TEST_FILE" 2>&1 | tee "$RUNNER_TEMP/cmem-proof/after.log"
+          producer_status=${PIPESTATUS[0]}
+          set -e
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/after.log" "$EXPECTED_PASS" 0 0 "$producer_status" 0
+      - name: Full repository Bun suite (canonical CI command)
+        run: |
+          set -euo pipefail
+          bun test tests 2>&1 | tee "$RUNNER_TEMP/cmem-proof/full-suite.log"
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/full-suite.log" > "$RUNNER_TEMP/cmem-proof/full-suite-counts.json"
+      - name: Openclaw suite (canonical CI command)
+        run: |
+          set -euo pipefail
+          bun test openclaw 2>&1 | tee "$RUNNER_TEMP/cmem-proof/openclaw.log"
+      - name: Semantic hydration and search contract selection
+        if: matrix.id == 'semantic-json'
+        run: |
+          set -euo pipefail
+          bun test tests/worker/search/ tests/services/sqlite/summary-file-filter-columns.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/search-selection.log"
+      - name: Import, native prompt and sync contract selection
+        if: matrix.id == 'native-import'
+        run: |
+          set -euo pipefail
+          bun test tests/sqlite/import-row-identities.test.ts tests/sqlite/native-prompt-identity.test.ts tests/worker/sync/canonical-content.test.ts tests/worker/sync/prompt-text-clamp.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/import-sync-selection.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-mem-${{ matrix.id }}-linux-proof
+          path: ${{ runner.temp }}/cmem-proof/
+          retention-days: 7
+
+  windows:
+    name: Windows declared core (${{ matrix.id }})
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - id: 'notes-size'
+            head: '44b8f83d587ada98dcde5ff3d4c38cad9b8efce5'
+            source: 'src/ui/viewer-template.html'
+            regression: 'tests/ui/viewer/notes-icon-size.browser.test.ts'
+            positive: 1
+            before_pass: 0
+            before_fail: 1
+            source_hash: '8464ed30b050d50abd0dabb48df43f9fa5c315205d4b6c73425bb6d3c7fc43c9'
+            test_hash: '874cb40c7864e2c14d8972f8937dedecf0f74d499aa04139db9e7fa33504190e'
+          - id: 'native-feed'
+            head: 'ae155936e8f9400370c11d77728883bffb9a0382'
+            source: 'src/services/worker/PaginationHelper.ts'
+            regression: 'tests/worker/http/routes/data-native-prompts.test.ts'
+            positive: 2
+            before_pass: 0
+            before_fail: 2
+            source_hash: '4a1d572da36910e1de5fd81b02f56e916ec62cd6a79be9ac1ccbb9989ca150a3'
+            test_hash: 'df5c4e038fca69c55b50fac8ea074da743af9f9f33da5ce9de3455bd78aac36a'
+          - id: 'feed-order'
+            head: 'b854696c8fef1f9d4d960df4e108dcaa98a056ab'
+            source: 'src/services/worker/PaginationHelper.ts'
+            regression: 'tests/worker/http/routes/data-tied-feed-order.test.ts'
+            positive: 1
+            before_pass: 0
+            before_fail: 1
+            source_hash: '44799e68d2eeab1a967ee2db800b1ce0a863438ce11bf72f63ba653d96813621'
+            test_hash: '7ddfd6f2790bfc33e41ac298b5d2210096cd010c6a42b5dce67523ff54a90e80'
+          - id: 'semantic-json'
+            head: 'f460281c9edf336c7ead96336dda92c9c03dfd12'
+            source: 'src/services/sqlite/SessionStore.ts'
+            regression: 'tests/worker/search/semantic-persisted-json.test.ts'
+            positive: 2
+            before_pass: 0
+            before_fail: 2
+            source_hash: 'f4d3f77a814c15d35b5b5682207e0014d94595d68e03cc3f64d22f0e34a30f45'
+            test_hash: '5fd966c02fc09e45f71aea7390dfef81814b03c8fa886ed9a514f999629d8295'
+          - id: 'native-import'
+            head: '7f151207ca323477755f22f9ab7fe165ad95c9f2'
+            source: 'src/services/sqlite/SessionStore.ts'
+            regression: 'tests/worker/http/routes/data-native-prompt-import.test.ts'
+            positive: 2
+            before_pass: 1
+            before_fail: 1
+            source_hash: 'c75f472ada19f79294adbf37193f5f6efb4d65795fedc3b96cf7929c72bc6b80'
+            test_hash: '3cb22ae979e9ccde5c31f2b534d92d38a911e5ca674749e6b3b65196907ae2ae'
+    # Pinned to windows-2022 (VS2022 / v17). The windows-latest image moved to
+    # windows-2025, which ships Visual Studio 18 — npm's bundled node-gyp@11.5.0
+    # can't detect it ("unknown version undefined") and native tree-sitter
+    # rebuilds fail during `npm install`. Revisit when node-gyp gains VS18 support.
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.head }}
+          fetch-depth: 2
+
+      - name: Verify immutable source identity
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne '${{ matrix.head }}') { throw 'Unexpected source head' }
+          if ((Get-FileHash '${{ matrix.source }}' -Algorithm SHA256).Hash.ToLower() -ne '${{ matrix.source_hash }}') { throw 'Source digest mismatch' }
+          if ((Get-FileHash '${{ matrix.regression }}' -Algorithm SHA256).Hash.ToLower() -ne '${{ matrix.test_hash }}') { throw 'Regression digest mismatch' }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .cm-candidate-proof
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Bun (worker runtime)
+        run: |
+          irm bun.sh/install.ps1 | iex
+        shell: pwsh
+
+      - shell: pwsh
+        run: |
+          npm install --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
+
+
+      - shell: pwsh
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'npm build failed' }
+
+
+      # Covers the Windows-only bun resolver path that Linux CI skips, plus the
+      # scripts that replaced rsync and tail: mirror pattern matching, --delete
+      # protection and -a metadata reconciliation against real NTFS paths, and
+      # the bounded log tail under a constrained heap.
+      - shell: pwsh
+        run: |
+          $bun = Join-Path $env:USERPROFILE '.bun\\bin\\bun.exe'
+          & $bun test tests/bun-runner.test.ts tests/scripts/mirror-dir.test.ts tests/scripts/worker-logs.test.ts 2>&1 | Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'cmem-windows-regression.log')
+          $producerStatus = $LASTEXITCODE
+          if ($producerStatus -ne 0) { throw 'Windows Bun regression producer failed' }
+          python .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py (Join-Path $env:RUNNER_TEMP 'cmem-windows-regression.log') 51 0 2 $producerStatus 0
+          if ($LASTEXITCODE -ne 0) { throw 'Windows executed counts disagree with the declared scope' }
+
+
+      # The step that used to be impossible on Windows: sync-marketplace shelled
+      # out to rsync. Runs the real script against a scratch USERPROFILE (Node's
+      # os.homedir() reads it on Windows) so the runner's own profile is
+      # untouched, then asserts the rsync semantics it replaced — stale files
+      # deleted, already-installed deps and excluded trees left alone.
+      - name: Exercise marketplace sync
+        shell: pwsh
+        run: |
+          $env:PATH = "$(Join-Path $env:USERPROFILE '.bun\bin');$env:PATH"
+
+          $scratchHome = Join-Path $env:RUNNER_TEMP 'sync-home'
+          $marketplace = Join-Path $scratchHome '.claude\plugins\marketplaces\thedotmack'
+          $dep = Join-Path $marketplace 'node_modules\pre-existing-dep'
+          New-Item -ItemType Directory -Force -Path $dep | Out-Null
+          Set-Content -Path (Join-Path $marketplace 'STALE-FROM-OLD-BUILD.js') -Value 'stale'
+          Set-Content -Path (Join-Path $dep 'index.js') -Value 'installed'
+
+          $env:USERPROFILE = $scratchHome
+          node scripts/sync-marketplace.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Marketplace sync producer failed' }
+
+          if (-not (Test-Path (Join-Path $marketplace 'plugin\.claude-plugin\plugin.json'))) {
+            throw 'sync did not populate the marketplace'
+          }
+          if (Test-Path (Join-Path $marketplace 'STALE-FROM-OLD-BUILD.js')) {
+            throw 'sync left a stale file behind (--delete equivalence broken)'
+          }
+          if (-not (Test-Path (Join-Path $dep 'index.js'))) {
+            throw 'sync deleted installed deps that --delete protected'
+          }
+          if (Test-Path (Join-Path $marketplace 'workers')) {
+            throw 'sync copied the excluded workers/ tree'
+          }
+
+      # worker:logs replaced `tail -n 50` + `date +%F`, neither of which exists
+      # in native PowerShell. Set-Content writes CRLF, so this also covers a
+      # Windows-native line ending that the bun test (LF) does not.
+      - name: Exercise worker log tail
+        shell: pwsh
+        run: |
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP 'log-home'
+          $logs = Join-Path $env:USERPROFILE '.claude-mem\logs'
+          New-Item -ItemType Directory -Force -Path $logs | Out-Null
+          $stamp = [DateTime]::UtcNow.ToString('yyyy-MM-dd')
+          Set-Content -Path (Join-Path $logs "claude-mem-$stamp.log") -Value (1..60 | ForEach-Object { "line $_" })
+
+          $out = node scripts/worker-logs.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Worker log producer failed' }
+          if ($out.Count -ne 50) { throw "expected 50 lines, got $($out.Count)" }
+          if ($out[0].TrimEnd() -ne 'line 11') { throw "expected first line 'line 11', got '$($out[0])'" }
+          if ($out[49].TrimEnd() -ne 'line 60') { throw "expected last line 'line 60', got '$($out[49])'" }
+
+      - name: Preserve generated Windows build diff
+        shell: pwsh
+        run: |
+          $diff = git diff --binary
+          if ($LASTEXITCODE -ne 0) { throw 'Generated diff capture failed' }
+          $diff | Set-Content (Join-Path $env:RUNNER_TEMP 'cmem-generated.patch')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-mem-${{ matrix.id }}-windows-generated-diff
+          path: |
+            ${{ runner.temp }}/cmem-generated.patch
+            ${{ runner.temp }}/cmem-windows-regression.log
+          retention-days: 7
