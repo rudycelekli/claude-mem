@@ -1,0 +1,86 @@
+[
+  {
+    "id": "semantic-json",
+    "head": "f460281c9edf336c7ead96336dda92c9c03dfd12",
+    "base": "a2150b2c09c6da01dfdc1296f8d2c3f3975a4418",
+    "run_id": 38412623170,
+    "job_id": 115348624676,
+    "proof_head": "1b1ce93d61f4a6e1921b11306464c0c106389a3d",
+    "artifact_id": 11825877371,
+    "artifact_digest": "sha256:f6e3fe57438a9d38f92a982747cb665befad50eeed0687b2902631d7afa905a6",
+    "node": "v20.20.2",
+    "bun": "1.4.3",
+    "file_hashes": {
+      "head.txt": "b5bdee2836c6e6d652ed38aee82816f0ccc472693ca9d243810adb49967adc48",
+      "node.txt": "fa2f297fd185bb1c8acba036117f05240eaa1f42eeb8902e870982523ae06edf",
+      "bun.txt": "bd31e8d9cf8d14a1e9e3fdf3b9f6a524819aed0d1b14627523c6765767c7d8f1",
+      "full-suite.log": "f200e1e6da4b2b68c0f2986410efd070602504df4e28cab1881458a9c1c8702d",
+      "before.log": "568ca035e099623a3d0509072d62ee12da932a0dcc908d1e596aec5107e385f7",
+      "after.log": "57bd8f7d43bf0254f267c9e4c83a1673b7a0b7733c81a6cdc063425219cad4f7",
+      "generated-build.patch": "b3e1a6b66cef05c7425367c7e4a7c5f179e4bf023536a71f4d8750c50b067106"
+    },
+    "full_counts": {
+      "pass": 8687,
+      "fail": 0,
+      "skip": 56,
+      "executed": 8743,
+      "files": 867
+    },
+    "before_counts": {
+      "pass": 0,
+      "fail": 2,
+      "skip": 0
+    },
+    "after_counts": {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0
+    },
+    "source_hashes": {
+      "src/services/sqlite/SessionStore.ts": "f4d3f77a814c15d35b5b5682207e0014d94595d68e03cc3f64d22f0e34a30f45",
+      "tests/worker/search/semantic-persisted-json.test.ts": "5fd966c02fc09e45f71aea7390dfef81814b03c8fa886ed9a514f999629d8295"
+    }
+  },
+  {
+    "id": "native-import",
+    "head": "7f151207ca323477755f22f9ab7fe165ad95c9f2",
+    "base": "a2150b2c09c6da01dfdc1296f8d2c3f3975a4418",
+    "run_id": 38412623170,
+    "job_id": 115348624904,
+    "proof_head": "1b1ce93d61f4a6e1921b11306464c0c106389a3d",
+    "artifact_id": 11828375259,
+    "artifact_digest": "sha256:6ad40115ca74f900ab7910e2fc3c1dab117a3f8e1fb56f5c1538c96b7cb81977",
+    "node": "v20.20.2",
+    "bun": "1.4.3",
+    "file_hashes": {
+      "head.txt": "ea5a20dff4909e241778513a607477a0e5053324a58a6d2909cb7f41a095a290",
+      "node.txt": "fa2f297fd185bb1c8acba036117f05240eaa1f42eeb8902e870982523ae06edf",
+      "bun.txt": "bd31e8d9cf8d14a1e9e3fdf3b9f6a524819aed0d1b14627523c6765767c7d8f1",
+      "full-suite.log": "89f8073fd64774ceffc669d2a232140c76da5552bc3a7fe703e1042a0ce1ddc9",
+      "before.log": "10d0608e3bc3d409f403f7e5e27b710613680d0cec97c33fdaab11de5ea6df34",
+      "after.log": "e86df4cc7d7f17bc09ba3dd56a568d8524212c240ddca206d480855c6aaede3a",
+      "generated-build.patch": "5c343a01764831fb18cdc0c12ba0e707a9946d5b55b38ccaa0a38494084a0d0a"
+    },
+    "full_counts": {
+      "pass": 8687,
+      "fail": 0,
+      "skip": 56,
+      "executed": 8743,
+      "files": 867
+    },
+    "before_counts": {
+      "pass": 1,
+      "fail": 1,
+      "skip": 0
+    },
+    "after_counts": {
+      "pass": 2,
+      "fail": 0,
+      "skip": 0
+    },
+    "source_hashes": {
+      "src/services/sqlite/SessionStore.ts": "c75f472ada19f79294adbf37193f5f6efb4d65795fedc3b96cf7929c72bc6b80",
+      "tests/worker/http/routes/data-native-prompt-import.test.ts": "3cb22ae979e9ccde5c31f2b534d92d38a911e5ca674749e6b3b65196907ae2ae"
+    }
+  }
+]
