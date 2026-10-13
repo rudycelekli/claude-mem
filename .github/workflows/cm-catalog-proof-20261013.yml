@@ -1,8 +1,7 @@
 name: Claude-mem catalog candidate proof
 
 on:
-  push:
-    branches: [campaign/cm-catalog-proof-20261013]
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -109,18 +108,28 @@ jobs:
           set -euo pipefail
           set +e
           bun test "$TEST_FILE" 2>&1 | tee "$RUNNER_TEMP/cmem-proof/after.log"
-          producer_status=${PIPESTATUS[0]}
+          pipeline_status=("${PIPESTATUS[@]}")
           set -e
-          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/after.log" "$EXPECTED_PASS" 0 0 "$producer_status" 0
+          test "${pipeline_status[1]}" -eq 0
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py "$RUNNER_TEMP/cmem-proof/after.log" "$EXPECTED_PASS" 0 0 "${pipeline_status[0]}" 0
       - name: Full repository Bun suite (canonical CI command)
         run: |
           set -euo pipefail
+          set +e
           bun test tests 2>&1 | tee "$RUNNER_TEMP/cmem-proof/full-suite.log"
-          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/full-suite.log" > "$RUNNER_TEMP/cmem-proof/full-suite-counts.json"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          test "${pipeline_status[1]}" -eq 0
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/full-suite.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/full-suite-counts.json"
       - name: Openclaw suite (canonical CI command)
         run: |
           set -euo pipefail
+          set +e
           bun test openclaw 2>&1 | tee "$RUNNER_TEMP/cmem-proof/openclaw.log"
+          pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+          test "${pipeline_status[1]}" -eq 0
+          python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/openclaw.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/openclaw-counts.json"
       - name: Semantic hydration and search contract selection
         if: matrix.id == 'semantic-json'
         run: |
