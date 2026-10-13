@@ -1767,7 +1767,7 @@ export class ChromaSync {
         this.selectiveFilters.set(filterKey, filtered.ids.length);
       }
 
-      results = await runQuery(limit, whereFilter, ['documents', 'metadatas', 'distances']);
+      results = await runQuery(limit, whereFilter, ['metadatas', 'distances']);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 

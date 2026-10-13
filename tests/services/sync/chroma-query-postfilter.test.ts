@@ -186,12 +186,12 @@ describe('ChromaSync.queryChroma adaptive post-filtering', () => {
     expect(qs[0].args.n_results).toBe(10);
   });
 
-  it('over-fetches only metadatas and distances, which is all it reads', async () => {
+  it('queries only metadatas and distances, which is all it reads', async () => {
     await sync.queryChroma('anything', 100, { project: 'tiny' });
 
     const qs = queryCalls();
     expect(qs[0].args.include).toEqual(['metadatas', 'distances']);
-    expect(qs[1].args.include).toEqual(['documents', 'metadatas', 'distances']);
+    expect(qs[1].args.include).toEqual(['metadatas', 'distances']);
   });
 
   it('never takes the fast path for a limit of zero', async () => {
