@@ -1,0 +1,91 @@
+---
+name: Claude-mem exact corpus source SyncHub diagnostic
+'on':
+  push:
+    branches:
+    - campaign/cm-sync-hub-diagnostic-20261013
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: claude-mem-corpus935-sync-hub-diagnostic
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: 93522e47a01b853fcbe7c556b02c915a62057427
+        fetch-depth: 1
+        persist-credentials: false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ github.sha }}"
+        path: ".cm-diagnostic-proof"
+        sparse-checkout: ".github/scripts"
+        fetch-depth: 1
+        persist-credentials: false
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 22.23.3
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      with:
+        bun-version: 1.4.3
+    - name: Freeze source tree and record documented runner-default runtime
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "93522e47a01b853fcbe7c556b02c915a62057427"
+        test "$(git rev-parse HEAD:workers/sync-hub)" = "157baf884e5765f22251ae0ceda31881e208b871"
+        test "$ImageVersion" = "20261004.327.1"
+        test "$(node --version)" = "v22.23.3"
+        test "$(bun --version)" = "1.4.3"
+        mkdir -p "$RUNNER_TEMP/sync-hub-proof"
+        git rev-parse HEAD > "$RUNNER_TEMP/sync-hub-proof/head.txt"
+        git rev-parse HEAD:workers/sync-hub > "$RUNNER_TEMP/sync-hub-proof/tree.txt"
+        node --version > "$RUNNER_TEMP/sync-hub-proof/node.txt"
+        bun --version > "$RUNNER_TEMP/sync-hub-proof/bun.txt"
+        printf '%s\n' "$ImageOS" "$ImageVersion" > "$RUNNER_TEMP/sync-hub-proof/runner-image.txt"
+        sha256sum workers/sync-hub/package.json workers/sync-hub/bun.lock workers/sync-hub/vitest.config.ts workers/sync-hub/wrangler.jsonc > "$RUNNER_TEMP/sync-hub-proof/config-hashes.txt"
+    - name: Test execution-count rejection controls
+      run: python3 .cm-diagnostic-proof/.github/scripts/cm-sync-hub-counts.py --self-test
+    - name: Durable Object anti-pattern grep
+      run: |
+        set -u
+        hits=$(grep -rn "setTimeout\|setInterval\|\.accept()\|connect(\|globalThis\.\(setTimeout\|setInterval\)" workers/sync-hub/src/do/ || true)
+        fetch_hits=$(grep -rn "fetch(" workers/sync-hub/src/do/ | grep -v "async fetch(request" || true)
+        if [ -n "$hits$fetch_hits" ]; then
+          echo "Durable Object anti-pattern hits (timers pin the DO awake; outbound I/O and legacy accept defeat hibernation):"
+          echo "$hits"
+          echo "$fetch_hits"
+          exit 1
+        fi
+        echo "clean"
+    - name: Install sync-hub dependencies
+      working-directory: workers/sync-hub
+      run: bun install --frozen-lockfile
+    - name: sync-hub tests (main suite)
+      working-directory: workers/sync-hub
+      run: |
+        set -euo pipefail
+        set +e
+        bun run test 2>&1 | tee "$RUNNER_TEMP/sync-hub-proof/main.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        python3 ../../.cm-diagnostic-proof/.github/scripts/cm-sync-hub-counts.py "$RUNNER_TEMP/sync-hub-proof/main.log" 7 141 "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/sync-hub-proof/main-counts.json"
+    - name: sync-hub tests (WebSocket suite)
+      working-directory: workers/sync-hub
+      run: |
+        set -euo pipefail
+        set +e
+        bun run test:ws 2>&1 | tee "$RUNNER_TEMP/sync-hub-proof/websocket.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        python3 ../../.cm-diagnostic-proof/.github/scripts/cm-sync-hub-counts.py "$RUNNER_TEMP/sync-hub-proof/websocket.log" 1 9 "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/sync-hub-proof/websocket-counts.json"
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: claude-mem-corpus935-sync-hub-diagnostic
+        path: "${{ runner.temp }}/sync-hub-proof/"
+        retention-days: 7
