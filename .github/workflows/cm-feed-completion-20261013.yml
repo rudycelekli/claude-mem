@@ -1,0 +1,150 @@
+---
+name: Claude-mem feed remaining core gates
+'on':
+  push:
+    branches:
+    - campaign/cm-feed-completion-20261013
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: claude-mem-feed-core-completion
+  cancel-in-progress: false
+jobs:
+  complete:
+    name: Complete core gates (${{ matrix.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+        - id: feed-order
+          head: b854696c8fef1f9d4d960df4e108dcaa98a056ab
+          run_id: 38412623170
+          artifact_id: 11825386201
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ matrix.head }}"
+        fetch-depth: 2
+        persist-credentials: false
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        ref: "${{ github.sha }}"
+        path: ".cm-candidate-proof"
+        sparse-checkout: ".github/scripts"
+        persist-credentials: false
+        fetch-depth: 1
+    - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      with:
+        python-version: '3.12'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      with:
+        node-version: 20.20.2
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      with:
+        bun-version: 1.4.3
+    - name: Verify immutable source and original runtime
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+        test "$(git show -s --format=%P HEAD)" = "a2150b2c09c6da01dfdc1296f8d2c3f3975a4418"
+        test "$(node --version)" = "v20.20.2"
+        test "$(bun --version)" = "1.4.3"
+        mkdir -p "$RUNNER_TEMP/cmem-proof"
+        python3 - <<'CHECK'
+        import hashlib,json,os,pathlib
+        rows=json.loads(pathlib.Path('.cm-candidate-proof/.github/scripts/cm-core-completion-manifest.json').read_text())
+        row=next(row for row in rows if row['id']==os.environ['CANDIDATE'])
+        for name,wanted in row['source_hashes'].items():
+            assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==wanted,name
+        CHECK
+      env:
+        EXPECTED_HEAD: "${{ matrix.head }}"
+        CANDIDATE: "${{ matrix.id }}"
+    - name: Test receipt evaluator and provenance guard
+      run: |
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --self-test
+        python3 .cm-candidate-proof/.github/scripts/cm-core-artifact-check.py --self-test
+    - name: Download immutable completed core artifact
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        artifact-ids: "${{ matrix.artifact_id }}"
+        run-id: "${{ matrix.run_id }}"
+        repository: rudycelekli/claude-mem
+        github-token: "${{ github.token }}"
+        path: "${{ runner.temp }}/prior-core"
+        merge-multiple: true
+    - name: Verify original job, artifact, counts and pipeline exits
+      run: 'python3 .cm-candidate-proof/.github/scripts/cm-core-artifact-check.py
+        .cm-candidate-proof/.github/scripts/cm-core-completion-manifest.json "$CANDIDATE"
+        "$RUNNER_TEMP/prior-core" "$RUNNER_TEMP/cmem-proof"
+
+'
+      env:
+        CANDIDATE: "${{ matrix.id }}"
+        GH_TOKEN: "${{ github.token }}"
+    - name: Install dependencies (canonical CI command)
+      run: npm install --no-audit --no-fund
+    - name: Verify committed bundles before rebuilding
+      run: bun test tests/infrastructure/version-consistency.test.ts tests/infrastructure/committed-plugin-bundles.test.ts
+    - name: Typecheck root and viewer (canonical CI command)
+      run: npm run typecheck
+    - name: Build with bundle-size guards (canonical CI command)
+      run: npm run build
+    - name: Preserve generated diff and recheck authored source
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+        test "$(git show -s --format=%P HEAD)" = "a2150b2c09c6da01dfdc1296f8d2c3f3975a4418"
+        test "$(node --version)" = "v20.20.2"
+        test "$(bun --version)" = "1.4.3"
+        mkdir -p "$RUNNER_TEMP/cmem-proof"
+        python3 - <<'CHECK'
+        import hashlib,json,os,pathlib
+        rows=json.loads(pathlib.Path('.cm-candidate-proof/.github/scripts/cm-core-completion-manifest.json').read_text())
+        row=next(row for row in rows if row['id']==os.environ['CANDIDATE'])
+        for name,wanted in row['source_hashes'].items():
+            assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest()==wanted,name
+        CHECK
+        git diff --binary > "$RUNNER_TEMP/cmem-proof/generated-completion-build.patch"
+      env:
+        EXPECTED_HEAD: "${{ matrix.head }}"
+        CANDIDATE: "${{ matrix.id }}"
+    - name: Complete Openclaw suite
+      run: |
+        set -euo pipefail
+        set +e
+        bun test openclaw 2>&1 | tee "$RUNNER_TEMP/cmem-proof/openclaw.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/openclaw.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/openclaw-counts.json"
+    - name: Complete semantic hydration and search contracts
+      run: |
+        set -euo pipefail
+        set +e
+        bun test tests/worker/search/ tests/services/sqlite/summary-file-filter-columns.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/search-selection.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/search-selection.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/search-selection-counts.json"
+      if: matrix.id == 'semantic-json'
+    - name: Complete native import and sync contracts
+      run: |
+        set -euo pipefail
+        set +e
+        bun test tests/sqlite/import-row-identities.test.ts tests/sqlite/native-prompt-identity.test.ts tests/worker/sync/canonical-content.test.ts tests/worker/sync/prompt-text-clamp.test.ts 2>&1 | tee "$RUNNER_TEMP/cmem-proof/import-selection.log"
+        pipeline_status=("${PIPESTATUS[@]}")
+        set -e
+        test "${pipeline_status[1]}" -eq 0
+        python3 .cm-candidate-proof/.github/scripts/cm-proof-evaluator.py --record "$RUNNER_TEMP/cmem-proof/import-selection.log" "${pipeline_status[0]}" "${pipeline_status[1]}" > "$RUNNER_TEMP/cmem-proof/import-selection-counts.json"
+      if: matrix.id == 'native-import'
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      if: always()
+      with:
+        name: claude-mem-${{ matrix.id }}-completed-core-proof
+        path: "${{ runner.temp }}/cmem-proof/"
+        retention-days: 7
