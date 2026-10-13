@@ -65,12 +65,19 @@ def verify(row, run, artifact, job, job_log, files):
             'producer_exit': 0, 'writer_exit': 0, 'exit_evidence': 'Pinned set -euo pipefail reached evaluator after Bun | tee'}
 
 
+def api_command(path, raw=False):
+    # Raw log bytes go to a captured buffer/file, never terminal rendering.
+    return ['gh', 'api', 'repos/rudycelekli/claude-mem/' + path] + (['--allow-escape-sequences'] if raw else [])
+
+
 def api(path, raw=False):
-    result = subprocess.check_output(['gh', 'api', 'repos/rudycelekli/claude-mem/' + path])
+    result = subprocess.check_output(api_command(path, raw))
     return result.decode() if raw else json.loads(result)
 
 
 def self_test():
+    assert api_command('actions/jobs/3/logs', True)[-1] == '--allow-escape-sequences'
+    assert '--allow-escape-sequences' not in api_command('actions/jobs/3', False)
     files = {'head.txt': b'candidate\n', 'node.txt': b'v20.20.2\n', 'bun.txt': b'1.4.3\n',
              'before.log': b' 0 pass\n 1 fail\nRan 1 test across 1 file. [1s]\n',
              'after.log': b' 1 pass\n 0 fail\nRan 1 test across 1 file. [1s]\n',
