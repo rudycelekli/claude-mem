@@ -55,7 +55,8 @@ const fixture = String.raw`
       const metadata = await (await fetch(url + '/' + input.name)).json();
       requests.push({ status: response.status, count: body.stats?.observation_count,
         persisted: saved?.observations.length, reread: metadata.stats?.observation_count,
-        filter: saved?.filter, ids: saved?.observations.map(o => o.id) });
+        filter: saved?.filter, ids: saved?.observations.map(o => o.id),
+        narratives: saved?.observations.map(o => o.narrative) });
     }
     console.log(JSON.stringify({ requests, calls, available: store.db.prepare('SELECT COUNT(*) AS n FROM observations').get().n }));
   } finally {
@@ -104,6 +105,10 @@ describe('corpus observation budget through registered HTTP routes', () => {
     expect(result.requests[0].reread).toBe(150);
     expect(new Set(result.requests[0].ids).size).toBe(150);
     expect(result.requests[0].filter.limit).toBe(150);
+    expect(result.requests[0].narratives).toHaveLength(150);
+    expect(result.requests[0].narratives.every((text: string) => text.startsWith('Recorded fact for module '))).toBe(true);
+    expect(result.calls.length).toBeGreaterThan(0);
+    for (const call of result.calls) expect(call.include).toEqual(['metadatas', 'distances']);
     expect(result.requests.map((r: { count: number }) => r.count)).toEqual([150, 500, 4]);
     expect(result.requests.map((r: { persisted: number }) => r.persisted)).toEqual([150, 500, 4]);
     expect(result.requests.map((r: { reread: number }) => r.reread)).toEqual([150, 500, 4]);
